@@ -14,13 +14,13 @@ import (
 )
 
 type Shelf struct {
-	ID        int64
+	Id        int64
 	ShelfType []uint8
 	Items     []int64
 }
 
 type Item struct {
-	ID          int64
+	Id          int64
 	ItemName    string
 	MainShelf   []uint8
 	OtherShelfs []uint8
@@ -35,6 +35,18 @@ type OrderDescription struct {
 	Id       int64
 	ItemId   int64
 	Quantity int64
+}
+
+type FinalOrder struct {
+	Shelf    []uint8
+	Products []Product
+}
+
+type Product struct {
+	ItemName    string
+	ItemId      int64
+	OrderNumber int64
+	ItemCount   int64
 }
 
 func (p *Postgres) getOrder(args []string) (*Order, error) {
@@ -75,122 +87,110 @@ func (p *Postgres) getOrder(args []string) (*Order, error) {
 
 func (p *Postgres) getOrderDescription(order *Order) error {
 	for _, orderDesc := range order.OrderDescription {
-		// Get single item by id
 		item, err := p.selectItemById(orderDesc.ItemId)
 		if err != nil {
 			log.Println(err)
 		}
 
-		p.getItemsByMainShelf2(item)
-
-		// ss, err := p.getItemsByMainShelf(item, item.MainShelf, item.ID, orderDesc.Quantity)
-		// if err != nil {
-		// 	log.Println(err)
-		// }
-		// fmt.Println(ss)
+		_, err = p.getItemsFromShelf(item, orderDesc.Quantity)
+		if err != nil {
+			log.Println(err)
+		}
 	}
 	return nil
 }
 
-func (p *Postgres) getItemsByMainShelf2(item *Item) {
-
-}
-
-func (p *Postgres) getShelllllfssss() {
+func (p *Postgres) getItemsFromShelf(item *Item, quantity int64) ([]FinalOrder, error) {
 	var shelf Shelf
-	var shelfs []Shelf
-	rows, err := p.db.Query("SELECT * FROM shelfs WHERE shelf_type = $1 LIMIT $2", shelfType, limit)
+	rows, err := p.db.Query("SELECT * FROM shelfs WHERE shelf_type = $1 LIMIT 1", item.MainShelf)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer rows.Close()
 
+	var finalOrders []FinalOrder
+
 	for rows.Next() {
 		var arrIds pq.Int64Array
-		err := rows.Scan(&shelf.ID, &shelf.ShelfType, &arrIds)
+		err := rows.Scan(&shelf.Id, &shelf.ShelfType, &arrIds)
 		if err != nil {
-			log.Fatal(err)
+			fmt.Printf("error to scan rows: [%s]\n", err.Error())
 		}
 		shelf.Items = arrIds
 
-		shelfs = append(shelfs, shelf)
-	}
+		finalOrder := FinalOrder{}
 
-	if err := rows.Err(); err != nil {
-		log.Fatal(err)
-	}
-}
-
-func (p *Postgres) getItemsByMainShelf(item *Item, shelfType []uint8, itemId int64, quantity int64) ([]Item, error) {
-
-	_, err := p.getShelfs(item, shelfType, itemId, quantity, 1)
-	if err != nil {
-		log.Panicln(err)
-	}
-	// fmt.Println(shelfs)
-
-	return nil, nil
-}
-
-func (p *Postgres) getShelfs(item *Item, shelfType []uint8, itemId int64, quantity int64, limit int64) ([]Shelf, error) {
-	var shelf Shelf
-	var shelfs []Shelf
-	rows, err := p.db.Query("SELECT * FROM shelfs WHERE shelf_type = $1 LIMIT $2", shelfType, limit)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		// var arrChars []uint8
-		var arrIds pq.Int64Array
-		err := rows.Scan(&shelf.ID, &shelf.ShelfType, &arrIds)
-		if err != nil {
-			log.Fatal(err)
-		}
-		// shelf.ShelfType = shelfType([]rune(string(arrChars))[0]) // convert incoming arrCahrs from db to rune/int32
-		shelf.Items = arrIds
-
-		shelfs = append(shelfs, shelf)
-	}
-
-	if err := rows.Err(); err != nil {
-		log.Fatal(err)
-	}
-
-	qunatityMap := make(map[string]int64)
-
-	for _, shelf := range shelfs {
 		for i, id := range shelf.Items {
-			if id == itemId {
-				qunatityMap["A"] += 1
+
+			if finalOrder.ItemCount != quantity && item.Id == id {
+				finalOrder.ItemCount += 1
 				shelf.Items[i] = 0
 			}
 
-			// Maybe here make db update ?
 		}
 
-		if qunatityMap["A"] != quantity {
-			if item.OtherShelfs == nil {
-				limit += 10
-				_, err := p.getShelfs(item, shelfType, itemId, quantity, limit)
-				if err != nil {
-					log.Println(err)
-				}
+		// Update the shelf array state / because we get items from it
+		if err := p.updateShelfState(shelf.Id, shelf.Items); err != nil {
+			log.Println(err)
+		}
 
-				return nil, nil
-			} else {
-				for _, ty := range item.OtherShelfs {
-					fmt.Println(string(ty))
-				}
+		if finalOrder.ItemCount != quantity {
+			if err := p.getWithMoreLimit(item, 10, finalOrder, quantity); err != nil {
+				log.Println(err)
 			}
 		}
 	}
 
-	return shelfs, nil
+	if err := rows.Err(); err != nil {
+		log.Fatal(err)
+	}
+
+	return finalOrders, nil
 }
 
-// func getQuantity(shelfs []Shelf)
+func (p *Postgres) getWithMoreLimit(item *Item, limit int64, finalOrder FinalOrder, quantity int64) error {
+	var shelf Shelf
+	var shelfs []Shelf
+	rows, err := p.db.Query("SELECT * FROM shelfs WHERE shelf_type = $1 LIMIT $2", item.MainShelf, limit)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var arrIds pq.Int64Array
+		err := rows.Scan(&shelf.Id, &shelf.ShelfType, &arrIds)
+		if err != nil {
+			fmt.Printf("error to scan rows: [%s]\n", err.Error())
+		}
+		shelf.Items = arrIds
+
+		shelfs = append(shelfs, shelf)
+	}
+
+	// for _, shelf := range shelfs {
+	// 	for _, i := range shelf.Items {
+	// 		if i == item.Id {
+	// 			if quantityMap[item.ItemName] == quantity {
+	// 				break
+	// 			}
+	// 			quantityMap[item.ItemName] += 1
+	// 		}
+	// 	}
+
+	// }
+
+	return nil
+}
+
+func (p *Postgres) updateShelfState(shelfId int64, updatedItems []int64) error {
+	_, err := p.db.Exec(`UPDATE shelfs SET items = $1 WHERE id = $2`, shelfId, updatedItems)
+	if err != nil {
+		return fmt.Errorf("error to update the shelf items state: [%s]", err.Error())
+	}
+
+	return nil
+}
 
 func main() {
 	if err := godotenv.Load(); err != nil {
@@ -242,6 +242,27 @@ func main() {
 	// }
 }
 
+// func (p *Postgres) getItemsFromOtherShelfs(shelfType string, limit int64) error {
+// 	var shelf Shelf
+// 	var shelfs []Shelf
+// 	rows, err := p.db.Query("SELECT * FROM shelfs WHERE shelf_type = $1 LIMIT $2", shelfType, limit)
+// 	if err != nil {
+// 		log.Fatal(err)
+// 	}
+// 	defer rows.Close()
+
+// 	return nil
+// }
+
+// if item.OtherShelfs != nil {
+// 	for _, ty := range item.OtherShelfs {
+// 		err := p.getItemsFromOtherShelfs(string(ty), 10)
+// 		if err != nil {
+// 			log.Println(err)
+// 		}
+// 	}
+// }
+
 type Postgres struct {
 	db *sql.DB
 }
@@ -268,6 +289,16 @@ func runPostgres() (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+func (p *Postgres) selectItemById(itemId int64) (*Item, error) {
+	var item Item
+	err := p.db.QueryRow("SELECT * FROM items WHERE id = $1", itemId).
+		Scan(&item.Id, &item.ItemName, &item.MainShelf, &item.OtherShelfs)
+	if err != nil {
+		return nil, fmt.Errorf("error to get item by id[%d]: [%s]", itemId, err.Error())
+	}
+	return &item, nil
 }
 
 func (p *Postgres) createShelfs() error {
@@ -314,31 +345,6 @@ func (p *Postgres) createOrders() error {
 	}
 	return nil
 }
-
-func (p *Postgres) selectItemById(itemId int64) (*Item, error) {
-	var item Item
-	// var mainShelf []uint8
-	// var otherShelfs []uint8
-	err := p.db.QueryRow("SELECT * FROM items WHERE id = $1", itemId).
-		Scan(&item.ID, &item.ItemName, &item.MainShelf, &item.OtherShelfs)
-	if err != nil {
-		return nil, fmt.Errorf("error to get item by id[%d]: [%s]", itemId, err.Error())
-	}
-	return &item, nil
-}
-
-// var orders = []OrderDescription{
-// 	{Id: 10, ItemId: 1, Quantity: 2},
-// 	{Id: 10, ItemId: 3, Quantity: 1},
-// 	{Id: 10, ItemId: 6, Quantity: 1},
-
-// 	{Id: 11, ItemId: 2, Quantity: 3},
-
-// 	{Id: 14, ItemId: 1, Quantity: 3},
-// 	{Id: 14, ItemId: 2, Quantity: 4},
-
-// 	{Id: 15, ItemId: 5, Quantity: 1},
-// }
 
 // func (p *Postgres) createRecords(paths []string) error {
 // 	for _, path := range paths {
