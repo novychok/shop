@@ -10,7 +10,6 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/lib/pq"
-	_ "github.com/lib/pq"
 )
 
 type Shelf struct {
@@ -38,7 +37,7 @@ type OrderDescription struct {
 }
 
 type FinalOrder struct {
-	Shelf    []uint8
+	Shelf    string
 	Products []Product
 }
 
@@ -49,28 +48,16 @@ type Product struct {
 	ItemCount   int64
 }
 
-func newFinalOrder(shelf []uint8) *FinalOrder {
-	return &FinalOrder{
-		Shelf:    shelf,
-		Products: []Product{},
-	}
-}
-
-func newProduct(itemName string, itemId, orderNumber, itemCount int64) *Product {
-	return &Product{
-		ItemName:    itemName,
-		ItemId:      itemId,
-		OrderNumber: orderNumber,
-		ItemCount:   itemCount,
-	}
-}
-
 func (p *Postgres) getOrder(args []string) (*Order, error) {
 	var orderDesc OrderDescription
 	order := Order{
 		Id:               1,
 		OrderDescription: []OrderDescription{},
 	}
+
+	// sort.Slice(order.OrderDescription, func(i, j int) bool {
+	// 	return order.OrderDescription[i].Id < order.OrderDescription[j].Id
+	// })
 
 	for _, arg := range args {
 		numArg, err := strconv.Atoi(arg)
@@ -100,7 +87,7 @@ func (p *Postgres) getOrder(args []string) (*Order, error) {
 	return &order, nil
 }
 
-func (p *Postgres) getOrderDescription(order *Order) error {
+func (p *Postgres) getOrderDescription(order *Order) ([]FinalOrder, error) {
 	var finalOrders []FinalOrder
 	for _, orderDesc := range order.OrderDescription {
 
@@ -115,25 +102,11 @@ func (p *Postgres) getOrderDescription(order *Order) error {
 			log.Println(err)
 		}
 
-		// Start to search in other shelfs if we don't get enough quantity of products
-		if quantity != orderDesc.Quantity {
-
-			if item.OtherShelfs != nil {
-				// Take items from item other shelfs
-				qunatity, err := p.getItemsFromOtherShelf(item, quantity, orderDesc.Quantity)
-				if err != nil {
-					log.Println(err)
-				}
-
-			}
-
-			// p.getItemsFromShelf(item, orderDesc, )
-		}
+		fmt.Println(quantity)
 
 		// Create final order
-		// ------------------
 		finalOrder := FinalOrder{
-			Shelf:    item.MainShelf,
+			Shelf:    string(item.MainShelf),
 			Products: []Product{},
 		}
 		product := Product{
@@ -143,88 +116,87 @@ func (p *Postgres) getOrderDescription(order *Order) error {
 			ItemCount:   quantity,
 		}
 
+		// Start to search in other shelfs if we don't get enough quantity of products
+		if quantity != orderDesc.Quantity {
+
+			if item.OtherShelfs != nil {
+				// Take items from item other shelfs
+				quantity, err := p.getItemsFromOtherShelf(item, quantity, orderDesc.Quantity, 100)
+				if err != nil {
+					log.Println(err)
+				}
+
+				if quantity != orderDesc.Quantity {
+					// Make recursive search of items from shelfs
+					fmt.Println("sorry don't have enough items in stock")
+					return finalOrders, nil
+				}
+
+			}
+
+		}
+
 		finalOrder.Products = append(finalOrder.Products, product)
 		finalOrders = append(finalOrders, finalOrder)
 	}
 
-	return nil
+	return finalOrders, nil
 }
 
-func (p *Postgres) getItemsFromOtherShelf(item *Item, count, orderCount int64) (int64, error) {
+// Get items from item other shelfs, if we don't get enough item quantity from shelf
+// and if item other shelf != nil
+func (p *Postgres) getItemsFromOtherShelf(item *Item, count, orderCount, limit int64) (int64, error) {
 	var shelf Shelf
 	var arrIds pq.Int64Array
 	var quantity int64 = count
 	for _, ty := range item.OtherShelfs {
-		err := p.db.QueryRow("SELECT * FROM shelfs WHERE shelf_type = $1 LIMIT 1", ty).
-			Scan(&shelf.Id, &shelf.ShelfType, &arrIds)
+		rows, err := p.db.Query("SELECT * FROM shelfs WHERE shelf_type = $1 LIMIT $2", ty, limit)
 		if err != nil {
-			return 0, fmt.Errorf("error to scan row: [%s]", err.Error())
+			return 0, fmt.Errorf("error getItemsFromOtherShelf to scan row: [%s]", err.Error())
 		}
+		defer rows.Close()
 		shelf.Items = arrIds // Use arrIds instead this
 
-		for i, id := range shelf.Items {
-			if id != item.Id {
-				continue
+		for rows.Next() {
+			err := rows.Scan(&shelf.Id, &shelf.ShelfType, &arrIds)
+			if err != nil {
+				log.Fatal(err)
 			}
-			quantity += 1
-			shelf.Items[i] = 0
-			if err := p.updateShelfState(shelf.Id, shelf.Items); err != nil {
-				log.Println(err)
+
+			for i, id := range shelf.Items {
+				if id != item.Id {
+					continue
+				}
+				quantity += 1
+				shelf.Items[i] = 0
+				if err := p.updateShelfState(shelf.Id, shelf.Items); err != nil {
+					log.Println(err)
+				}
+
+				if quantity == orderCount {
+					return quantity, nil
+				}
 			}
 		}
-	}
-
-	if quantity != orderCount {
+		if err := rows.Err(); err != nil {
+			log.Fatal(err)
+		}
 
 	}
 
 	return quantity, nil
 }
 
-func (p *Postgres) getItemsWithMoreLimit(item *Item, shelfType string, quantity, limit int64) (int64, error) {
-	var shelf Shelf
-	var shelfs []Shelf
-	rows, err := p.db.Query("SELECT * FROM shelfs WHERE shelf_type = $1 LIMIT $2", shelfType, limit)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var arrIds pq.Int64Array
-		err := rows.Scan(&shelf.Id, &shelf.ShelfType, &arrIds)
-		if err != nil {
-			fmt.Printf("error to scan rows: [%s]\n", err.Error())
-		}
-		shelf.Items = arrIds
-
-		shelfs = append(shelfs, shelf)
-	}
-
-	// for _, shelf := range shelfs {
-	// 	for _, i := range shelf.Items {
-	// 		if i == item.Id {
-	// 			if quantityMap[item.ItemName] == quantity {
-	// 				break
-	// 			}
-	// 			quantityMap[item.ItemName] += 1
-	// 		}
-	// 	}
-
-	// }
-
-	return 0, nil
-}
-
+// Get items from a shelf
 func (p *Postgres) getItemsFromShelf(item *Item) (int64, error) {
 	var shelf Shelf
 	var arrIds pq.Int64Array
 	err := p.db.QueryRow("SELECT * FROM shelfs WHERE shelf_type = $1 LIMIT 1", item.MainShelf).
 		Scan(&shelf.Id, &shelf.ShelfType, &arrIds)
 	if err != nil {
-		return 0, fmt.Errorf("error to scan row: [%s]", err.Error())
+		return 0, fmt.Errorf("error getItemsFromShelf to scan row: [%s]", err.Error())
 	}
-	shelf.Items = arrIds // Use arrIds instead this
+	shelf.Items = arrIds
 
 	var quantity int64 = 0
 	for i, id := range shelf.Items {
@@ -241,13 +213,27 @@ func (p *Postgres) getItemsFromShelf(item *Item) (int64, error) {
 	return quantity, nil
 }
 
+// Update shelf items after retrieve certain item
 func (p *Postgres) updateShelfState(shelfId int64, updatedItems []int64) error {
-	_, err := p.db.Exec(`UPDATE shelfs SET items = $1 WHERE id = $2`, updatedItems, shelfId)
+	var ret pq.Int64Array
+	ret = updatedItems
+	_, err := p.db.Exec(`UPDATE shelfs SET items = $1 WHERE id = $2`, ret, shelfId)
 	if err != nil {
 		return fmt.Errorf("error to update the shelf items state: [%s]", err.Error())
 	}
 
 	return nil
+}
+
+// Get single item from psql
+func (p *Postgres) selectItemById(itemId int64) (*Item, error) {
+	var item Item
+	err := p.db.QueryRow("SELECT * FROM items WHERE id = $1", itemId).
+		Scan(&item.Id, &item.ItemName, &item.MainShelf, &item.OtherShelfs)
+	if err != nil {
+		return nil, fmt.Errorf("error to get item by id[%d]: [%s]", itemId, err.Error())
+	}
+	return &item, nil
 }
 
 func main() {
@@ -267,59 +253,25 @@ func main() {
 
 	psql := NewPostgres(db)
 
-	// if err := psql.createOrders(); err != nil {
-	// 	log.Println(err)
-	// }
+	// Init tables orders, shelfs, items
+	if err := psql.initTables(); err != nil {
+		log.Println(err)
+	}
 
-	// Get formed orders description from database
 	order, err := psql.getOrder(args)
 	if err != nil {
 		log.Println(err)
 	}
 
-	// Get particular order description
-	if err := psql.getOrderDescription(order); err != nil {
+	finalOrders, err := psql.getOrderDescription(order)
+	if err != nil {
 		log.Println(err)
 	}
 
-	// shelfs, err := psql.getShelfs()
-	// if err != nil {
-	// 	fmt.Println(err)
-	// }
-
-	// if err := psql.rangeOverOrders(order); err != nil {
-	// 	log.Println(err)
-	// }
-
-	// if err := repo.createRecords(paths); err != nil {
-	// 	fmt.Println(err)
-	// }
-
-	// if err := repo.getItems(res, args); err != nil {
-	// 	fmt.Println(err)
-	// }
+	for _, finalOrder := range finalOrders {
+		fmt.Printf("%+v\n", finalOrder)
+	}
 }
-
-// func (p *Postgres) getItemsFromOtherShelfs(shelfType string, limit int64) error {
-// 	var shelf Shelf
-// 	var shelfs []Shelf
-// 	rows, err := p.db.Query("SELECT * FROM shelfs WHERE shelf_type = $1 LIMIT $2", shelfType, limit)
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-// 	defer rows.Close()
-
-// 	return nil
-// }
-
-// if item.OtherShelfs != nil {
-// 	for _, ty := range item.OtherShelfs {
-// 		err := p.getItemsFromOtherShelfs(string(ty), 10)
-// 		if err != nil {
-// 			log.Println(err)
-// 		}
-// 	}
-// }
 
 type Postgres struct {
 	db *sql.DB
@@ -349,14 +301,36 @@ func runPostgres() (*sql.DB, error) {
 	return db, nil
 }
 
-func (p *Postgres) selectItemById(itemId int64) (*Item, error) {
-	var item Item
-	err := p.db.QueryRow("SELECT * FROM items WHERE id = $1", itemId).
-		Scan(&item.Id, &item.ItemName, &item.MainShelf, &item.OtherShelfs)
-	if err != nil {
-		return nil, fmt.Errorf("error to get item by id[%d]: [%s]", itemId, err.Error())
+func (p *Postgres) initTables() error {
+	if err := p.createOrders(); err != nil {
+		log.Println(err)
 	}
-	return &item, nil
+	if err := p.createShelfs(); err != nil {
+		log.Println(err)
+	}
+	if err := p.createItems(); err != nil {
+		log.Println(err)
+	}
+
+	return nil
+}
+
+func (p *Postgres) createOrders() error {
+	query := `CREATE TABLE IF NOT EXISTS order_description(
+		id INTEGER,
+		item_id INTEGER,
+		quantity INTEGER);
+	INSERT INTO order_description(id, item_id, quantity) VALUES(10, 1, 2);
+	INSERT INTO order_description(id, item_id, quantity) VALUES(10, 3, 1);
+	INSERT INTO order_description(id, item_id, quantity) VALUES(10, 6, 1);
+	INSERT INTO order_description(id, item_id, quantity) VALUES(11, 2, 3);
+	INSERT INTO order_description(id, item_id, quantity) VALUES(14, 1, 3);
+	INSERT INTO order_description(id, item_id, quantity) VALUES(14, 2, 4);
+	INSERT INTO order_description(id, item_id, quantity) VALUES(15, 5, 1);`
+	if _, err := p.db.Exec(query); err != nil {
+		return fmt.Errorf("error to insert orders: [%s]", err.Error())
+	}
+	return nil
 }
 
 func (p *Postgres) createShelfs() error {
@@ -364,88 +338,36 @@ func (p *Postgres) createShelfs() error {
 		id BIGSERIAL PRIMARY KEY NOT NULL,
 		shelf_type CHAR,
 		items INTEGER[]);
-	INSERT INTO shelfs(shelf_type, items) VALUES('А', ARRAY[8, 8, 8, 8, 8, 8, 8, 8, 8, 1, 2, 8, 8, 1]);
-	INSERT INTO shelfs(shelf_type, items) VALUES('Б', ARRAY[8, 8, 8, 8, 8, 8, 8, 8, 8, 3, 8, 8, 8, 8]);
-	INSERT INTO shelfs(shelf_type, items) VALUES('Ж', ARRAY[8, 8, 8, 8, 8, 8, 8, 8, 8, 6, 8, 8, 8, 4]);
-	INSERT INTO shelfs(shelf_type, items) VALUES('З', ARRAY[3, 8, 8, 8, 8, 8, 8, 8, 8, 1, 2, 8, 8, 1]);
-	INSERT INTO shelfs(shelf_type, items) VALUES('В', ARRAY[3, 8, 8, 8, 8, 8, 8, 8, 8, 1, 2, 8, 8, 1]);
-	INSERT INTO shelfs(shelf_type, items) VALUES('А', ARRAY[8, 8, 8, 8, 8, 8, 8, 8, 8, 1, 2, 8, 8, 1]);
-	INSERT INTO shelfs(shelf_type, items) VALUES('Б', ARRAY[8, 8, 8, 8, 8, 8, 8, 8, 8, 3, 8, 8, 8, 8]);
-	INSERT INTO shelfs(shelf_type, items) VALUES('Ж', ARRAY[8, 8, 8, 8, 8, 8, 8, 8, 8, 6, 8, 8, 8, 4]);
-	INSERT INTO shelfs(shelf_type, items) VALUES('З', ARRAY[3, 8, 8, 8, 8, 8, 8, 8, 8, 1, 2, 8, 8, 1]);
-	INSERT INTO shelfs(shelf_type, items) VALUES('В', ARRAY[3, 8, 8, 8, 8, 8, 8, 8, 8, 1, 2, 8, 8, 1]);
-	INSERT INTO shelfs(shelf_type, items) VALUES('А', ARRAY[8, 8, 8, 8, 8, 8, 8, 8, 8, 1, 2, 8, 8, 1]);
-	INSERT INTO shelfs(shelf_type, items) VALUES('Б', ARRAY[8, 8, 8, 8, 8, 8, 8, 8, 8, 3, 8, 8, 8, 8]);
-	INSERT INTO shelfs(shelf_type, items) VALUES('Ж', ARRAY[8, 8, 8, 8, 8, 8, 8, 8, 8, 6, 8, 8, 8, 4]);
-	INSERT INTO shelfs(shelf_type, items) VALUES('З', ARRAY[3, 8, 8, 8, 8, 8, 8, 8, 8, 1, 2, 8, 8, 1]);
-	INSERT INTO shelfs(shelf_type, items) VALUES('В', ARRAY[3, 8, 8, 8, 8, 8, 8, 8, 8, 1, 2, 8, 8, 1]);
-	INSERT INTO shelfs(shelf_type, items) VALUES('А', ARRAY[8, 8, 8, 8, 8, 8, 8, 8, 8, 1, 2, 8, 8, 1]);`
+	INSERT INTO shelfs(shelf_type, items) VALUES('А', ARRAY[1,1,3,6,2,2,2,1,1,1,2,2,2,2,5]);
+	INSERT INTO shelfs(shelf_type, items) VALUES('А', ARRAY[1,1,3,6,2,2,2,1,1,1,2,2,2,2,5]);
+	INSERT INTO shelfs(shelf_type, items) VALUES('Б', ARRAY[1,1,3,6,2,2,2,1,1,1,2,2,2,2,5]);
+	INSERT INTO shelfs(shelf_type, items) VALUES('Б', ARRAY[1,1,3,6,2,2,2,1,1,1,2,2,2,2,5]);
+	INSERT INTO shelfs(shelf_type, items) VALUES('Ж', ARRAY[1,1,3,6,2,2,2,1,1,1,2,2,2,2,5]);
+	INSERT INTO shelfs(shelf_type, items) VALUES('Ж', ARRAY[1,1,3,6,2,2,2,1,1,1,2,2,2,2,5]);
+	INSERT INTO shelfs(shelf_type, items) VALUES('З', ARRAY[1,1,3,6,2,2,2,1,1,1,2,2,2,2,5]);
+	INSERT INTO shelfs(shelf_type, items) VALUES('З', ARRAY[1,1,3,6,2,2,2,1,1,1,2,2,2,2,5]);
+	INSERT INTO shelfs(shelf_type, items) VALUES('В', ARRAY[1,1,3,6,2,2,2,1,1,1,2,2,2,2,5]);
+	INSERT INTO shelfs(shelf_type, items) VALUES('В', ARRAY[1,1,3,6,2,2,2,1,1,1,2,2,2,2,5]);`
 	if _, err := p.db.Exec(query); err != nil {
 		return fmt.Errorf("error to insert shelfs: [%s]", err.Error())
 	}
 	return nil
 }
 
-func (p *Postgres) createOrders() error {
-	query := `CREATE TABLE IF NOT EXISTS orders(
-		id INTEGER,
-		item_id INTEGER,
-		quantity INTEGER);
-	INSERT INTO orders(id, item_id, quantity) VALUES(10, 1, 2);
-	INSERT INTO orders(id, item_id, quantity) VALUES(10, 3, 1);
-	INSERT INTO orders(id, item_id, quantity) VALUES(10, 6, 1);
-	INSERT INTO orders(id, item_id, quantity) VALUES(11, 2, 3);
-	INSERT INTO orders(id, item_id, quantity) VALUES(14, 1, 3);
-	INSERT INTO orders(id, item_id, quantity) VALUES(14, 2, 4);
-	INSERT INTO orders(id, item_id, quantity) VALUES(15, 5, 1);`
+func (p *Postgres) createItems() error {
+	query := `CREATE TABLE IF NOT EXISTS items(
+		id BIGSERIAL PRIMARY KEY NOT NULL,
+		item_name VARCHAR(100),
+		main_shelf CHAR,
+		other_shelfs CHAR[]);
+	INSERT INTO items(item_name, main_shelf, other_shelfs) VALUES ('Laptop', 'А', NULL);
+	INSERT INTO items(item_name, main_shelf, other_shelfs) VALUES ('Moitor', 'А', NULL);
+	INSERT INTO items(item_name, main_shelf, other_shelfs) VALUES ('Phone', 'Б', '{З,В}');
+	INSERT INTO items(item_name, main_shelf, other_shelfs) VALUES ('PC', 'Ж', NULL);
+	INSERT INTO items(item_name, main_shelf, other_shelfs) VALUES ('Watch', 'Ж', NULL);
+	INSERT INTO items(item_name, main_shelf, other_shelfs) VALUES ('Microphone', 'Ж', NULL);`
 	if _, err := p.db.Exec(query); err != nil {
-		return fmt.Errorf("error to insert orders: [%s]", err.Error())
+		return fmt.Errorf("error to insert items: [%s]", err.Error())
 	}
 	return nil
 }
-
-// func (p *Postgres) createRecords(paths []string) error {
-// 	for _, path := range paths {
-// 		file, err := os.ReadFile(path)
-// 		if err != nil {
-// 			return fmt.Errorf("error to read the file: [%s]", err.Error())
-// 		}
-
-// 		rows := strings.Split(string(file), ";")
-// 		for _, row := range rows {
-// 			_, err := p.db.Exec(row)
-// 			if err != nil {
-// 				fmt.Printf("error executing SQL statement - [%s], err: [%s]\n", row, err.Error())
-// 			}
-// 		}
-// 	}
-// 	return nil
-// }
-
-// func (p *Postgres) getItems(shelfs []Shelf, args []string) error {
-// 	for _, arg := range args {
-// 		argToInt, err := strconv.Atoi(arg)
-// 		if err != nil {
-// 			fmt.Printf("error to cast arg to integer: [%s]\n", err.Error())
-// 		}
-// 		for _, shelf := range shelfs {
-// 			id := shelf.Items[argToInt-1]
-// 			itemsMap := make(map[int64]int)
-
-// 			for _, total := range shelf.Items {
-// 				itemsMap[total] += 1
-// 			}
-
-// 			// count := itemsMap[id]
-
-// 			item, err := p.selectItemById(id)
-// 			if err != nil {
-// 				fmt.Printf("error to get item by given id: [%s]\n", err.Error())
-// 			}
-
-// 			fmt.Println(item)
-// 		}
-// 	}
-
-// 	return nil
-// }

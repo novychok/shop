@@ -4,5 +4,5 @@ build:
 run: build
 	@./bin/*
 
-test:
-	@go test -v ./...
+drop:
+	@go run ./dropdb/*.go
