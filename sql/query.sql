@@ -37,16 +37,14 @@ INSERT INTO items(item_name, main_shelf, other_shelfs) VALUES ('Watch', 'Ж', '{
 INSERT INTO items(item_name, main_shelf, other_shelfs) VALUES ('Microphone', 'Ж', NULL);
 
 INSERT INTO shelfs(shelf_type, items) VALUES('А', ARRAY[1,1,8,1,1,1,8,8,2,2,8,8,8,8,8,8,8,8,8]);
--- INSERT INTO shelfs(shelf_type, items) VALUES('А', ARRAY[2,2,2,1,8,1,1,8,8,8,8,8,8,8,8,8,8,8,8]);
-
 INSERT INTO shelfs(shelf_type, items) VALUES('Б', ARRAY[8,8,3,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8]);
--- INSERT INTO shelfs(shelf_type, items) VALUES('Б', ARRAY[8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8]);
-
 INSERT INTO shelfs(shelf_type, items) VALUES('Ж', ARRAY[6,4,8,4,4,5,8,8,8,8,8,8,8,8,8,8,8,8,8]);
--- INSERT INTO shelfs(shelf_type, items) VALUES('Ж', ARRAY[8,5,8,6,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8]);
-
--- INSERT INTO shelfs(shelf_type, items) VALUES('З', ARRAY[8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8]);
--- INSERT INTO shelfs(shelf_type, items) VALUES('З', ARRAY[8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8]);
-
--- INSERT INTO shelfs(shelf_type, items) VALUES('В', ARRAY[8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8]);
--- INSERT INTO shelfs(shelf_type, items) VALUES('В', ARRAY[8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8]);
+INSERT INTO shelfs(shelf_type, items) VALUES('А', ARRAY[1,1,8,1,1,1,8,8,2,2,8,8,8,8,8,8,8,8,8]);
+INSERT INTO shelfs(shelf_type, items) VALUES('Б', ARRAY[8,8,3,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8]);
+INSERT INTO shelfs(shelf_type, items) VALUES('Ж', ARRAY[6,4,8,4,4,5,8,8,8,8,8,8,8,8,8,8,8,8,8]);
+INSERT INTO shelfs(shelf_type, items) VALUES('А', ARRAY[1,1,8,1,1,1,8,8,2,2,8,8,8,8,8,8,8,8,8]);
+INSERT INTO shelfs(shelf_type, items) VALUES('Б', ARRAY[8,8,3,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8]);
+INSERT INTO shelfs(shelf_type, items) VALUES('Ж', ARRAY[6,4,8,4,4,5,8,8,8,8,8,8,8,8,8,8,8,8,8]);
+INSERT INTO shelfs(shelf_type, items) VALUES('А', ARRAY[1,1,8,1,1,1,8,8,2,2,8,8,8,8,8,8,8,8,8]);
+INSERT INTO shelfs(shelf_type, items) VALUES('Б', ARRAY[8,8,3,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8]);
+INSERT INTO shelfs(shelf_type, items) VALUES('Ж', ARRAY[6,4,8,4,4,5,8,8,8,8,8,8,8,8,8,8,8,8,8]);

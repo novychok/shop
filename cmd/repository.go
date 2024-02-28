@@ -16,55 +16,50 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
-func (r *Repository) getItemsFromOtherShelfsWithLimit(shelfType []uint8) (int64, error) {
+// func (r *Repository) getItemsFromOtherShelfsWithLimit(shelfType []uint8) (int64, error) {
 
-	return 0, nil
-}
-
-// func (r *Repository) getItemsFromShelf(item *Item, reservedQuant, offset, limit, aburjubur int64) (quantity int64, err error) {
-// 	var shelf Shelf
-// 	var arrIds pq.Int64Array
-// 	rows, err := r.db.Query("SELECT * FROM shelfs WHERE shelf_type = $1 OFFSET $2 LIMIT $3", item.MainShelf, offset, limit)
-
-// 	if err != nil {
-// 		return 0, fmt.Errorf("error getItemsFromShelf to scan row: [%s]", err.Error())
-// 	}
-
-// 	for rows.Next() {
-// 		err := rows.Scan(&shelf.Id, &shelf.ShelfType, &arrIds)
-// 		if err != nil {
-// 			log.Fatal(err)
-// 		}
-// 		shelf.Items = arrIds
-
-// 		// var quantity int64 = 0
-// 		for i, id := range shelf.Items {
-// 			if id != item.Id {
-// 				continue
-// 			}
-// 			if quantity == reservedQuant {
-// 				return quantity, nil
-// 			}
-// 			if quantity+aburjubur == reservedQuant {
-// 				return quantity, nil
-// 			}
-// 			quantity += 1
-
-// 			shelf.Items[i] = 0
-
-// 			if err := r.updateShelfById(shelf.Id, shelf.Items); err != nil {
-// 				log.Println(err)
-// 			}
-// 		}
-// 	}
-// 	if err := rows.Err(); err != nil {
-// 		log.Fatal(err)
-// 	}
-
-// 	return quantity, nil
+// 	return 0, nil
 // }
 
-func (r *Repository) getItemsFromShelf(item *Item) (quantity int64, err error) {
+func (r *Repository) getItemsFromShelfWithLimit(item *Item, howMuchHave, howMuchNeed, offset, limit int64) (int64, error) {
+	var shelf Shelf
+	var arrIds pq.Int64Array
+	fmt.Println(howMuchHave)
+	rows, err := r.db.Query("SELECT * FROM shelfs WHERE shelf_type = $1 OFFSET $2 LIMIT $3", item.MainShelf, offset, limit)
+	if err != nil {
+		return 0, fmt.Errorf("error to execute the query: [%s]", err.Error())
+	}
+
+	for rows.Next() {
+		err := rows.Scan(&shelf.Id, &shelf.ShelfType, &arrIds)
+		if err != nil {
+			return 0, fmt.Errorf("error to scan row with limit: [%s]", err.Error())
+		}
+		shelf.Items = arrIds
+
+		for i, id := range shelf.Items {
+			if id != item.Id {
+				continue
+			}
+			if howMuchHave == howMuchNeed {
+				return howMuchNeed, nil
+			}
+			howMuchHave += 1
+			shelf.Items[i] = 0
+
+			if err := r.updateShelfById(shelf.Id, shelf.Items); err != nil {
+				log.Println(err)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Fatal(err)
+	}
+
+	return howMuchHave, nil
+}
+
+func (r *Repository) getItemsFromShelf(item *Item, reservedQuantity int64) (quantity int64, err error) {
 	var shelf Shelf
 	var arrIds pq.Int64Array
 	err = r.db.QueryRow("SELECT * FROM shelfs WHERE shelf_type = $1 LIMIT 1", item.MainShelf).
@@ -78,10 +73,11 @@ func (r *Repository) getItemsFromShelf(item *Item) (quantity int64, err error) {
 		if id != item.Id {
 			continue
 		}
-
+		if quantity == reservedQuantity {
+			return quantity, nil
+		}
 		quantity += 1
 		shelf.Items[i] = 0
-
 		if err := r.updateShelfById(shelf.Id, shelf.Items); err != nil {
 			log.Println(err)
 		}
@@ -128,7 +124,6 @@ func (r *Repository) getItemById(itemId int64) (*Item, error) {
 
 func (r *Repository) updateShelfById(shelfId int64, updatedItems []int64) error {
 	var update pq.Int64Array = updatedItems
-	fmt.Println(update)
 	_, err := r.db.Exec(`UPDATE shelfs SET items = $1 WHERE id = $2`, update, shelfId)
 	if err != nil {
 		return fmt.Errorf("error to update the shelf items state: [%s]", err.Error())

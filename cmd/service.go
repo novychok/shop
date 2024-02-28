@@ -5,6 +5,7 @@ import (
 	"log"
 	"sort"
 	"strconv"
+	"time"
 )
 
 type Service struct {
@@ -41,37 +42,38 @@ func (s *Service) execute(orderNumbers []string) (map[string][]Order, error) {
 				}
 
 				var quantity int64 = 0
-				// var offset int64 = 0
-				var limit int64 = 1
+				var offset int64 = 0
+				var limit int64 = 5
 
-				quantity, err = s.repository.getItemsFromShelf(item, reserve.Quantity, limit)
+				quantity, err = s.repository.getItemsFromShelf(item, reserve.Quantity)
 				if err != nil {
 					log.Println(err)
 				}
 
-				// if quantity != reserve.Quantity {
+				if quantity != reserve.Quantity {
+					fmt.Println(quantity)
+					if len(item.OtherShelfs) == 0 {
 
-				// 	if len(item.OtherShelfs) == 0 {
+						for quantity != reserve.Quantity {
+							time.Sleep(1 * time.Second)
 
-				// 		for quantity != reserve.Quantity {
-				// 			time.Sleep(1 * time.Second)
-				// 			limit += 5
-				// 			offset = limit
+							quantity, err = s.repository.getItemsFromShelfWithLimit(item, quantity, reserve.Quantity, offset, limit)
+							if err != nil {
+								log.Println(err)
+							}
+							fmt.Println(quantity)
+							limit += 5
+							offset += 5
+						}
 
-				// 			quantity, err = s.repository.getItemsFromShelf(item, reserve.Quantity, offset, limit, quantity)
-				// 			if err != nil {
-				// 				log.Println(err)
-				// 			}
-				// 		}
-
-				// 	} else {
-				// 		// quantity, err = s.repository.getItemsFromOtherShelfsWithLimit([]uint8{})
-				// 		// if err != nil {
-				// 		// 	log.Println(err)
-				// 		// }
-				// 		fmt.Println("got on two")
-				// 	}
-				// }
+					} else {
+						// quantity, err = s.repository.getItemsFromOtherShelfsWithLimit([]uint8{})
+						// if err != nil {
+						// 	log.Println(err)
+						// }
+						fmt.Println("got on two")
+					}
+				}
 
 				itemOthShel := []string{}
 				if item.OtherShelfs != nil {
