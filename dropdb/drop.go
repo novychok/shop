@@ -54,7 +54,7 @@ func main() {
 }
 
 func (p *Postgres) dropAllTables() error {
-	_, err := p.db.Exec(`DROP TABLE items, shelfs, order_description;`)
+	_, err := p.db.Exec(`DROP TABLE IF EXISTS items, shelfs, orders, reserves;`)
 	if err != nil {
 		return fmt.Errorf("error to rop tables: [%s]", err.Error())
 	}
