@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"unsafe"
 
 	"github.com/lib/pq"
 )
@@ -20,9 +19,7 @@ func NewRepository(db *sql.DB) *Repository {
 // getItemsFromOtherItemShelfs make same functionality as getItemsFromShelfWithLimit, but use other shelfs, instead using main shelf.
 // and have fixed limit (maybe there is multiple other shelfs)
 func (r *Repository) getItemsFromOtherItemShelfs(item *Item, howMuchHave, howMuchNeed, offset, limit int64, otherShel int32) (int64, error) {
-	otherShelToBytes := *(*[]uint8)(unsafe.Pointer(&otherShel)) // Casting to DB type to find with additional shelf
-	fmt.Println(otherShelToBytes)
-	rows, err := r.db.Query("SELECT * FROM shelfs WHERE shelf_type = $1 OFFSET $2 LIMIT $3", []uint8(otherShelToBytes), offset, limit)
+	rows, err := r.db.Query("SELECT * FROM shelfs WHERE shelf_type = $1 OFFSET $2 LIMIT $3", otherShel, offset, limit)
 	if err != nil {
 		return 0, fmt.Errorf("error to execute the query: [%s]", err.Error())
 	}
@@ -33,8 +30,6 @@ func (r *Repository) getItemsFromOtherItemShelfs(item *Item, howMuchHave, howMuc
 		if err != nil {
 			return 0, fmt.Errorf("error to scan row with limit: [%s]", err.Error())
 		}
-		fmt.Println(shelf)
-		fmt.Println(howMuchHave)
 
 		for i, id := range shelf.Items {
 			if id != item.Id {
@@ -98,7 +93,7 @@ func (r *Repository) getItemsFromShelfWithLimit(item *Item, howMuchHave, howMuch
 func (r *Repository) getItemsFromShelf(item *Item, reservedQuantity int64) (quantity int64, err error) {
 	var shelf Shelf
 	var arrIds pq.Int64Array
-	err = r.db.QueryRow("SELECT * FROM shelfs WHERE shelf_type = $1 LIMIT 1", item.MainShelf).
+	err = r.db.QueryRow("SELECT * FROM shelfs WHERE shelf_type = $1 LIMIT 1", int(item.MainShelf)).
 		Scan(&shelf.Id, &shelf.ShelfType, &arrIds)
 	if err != nil {
 		return 0, fmt.Errorf("error getItemsFromShelf to scan row: [%s]", err.Error())
@@ -123,6 +118,7 @@ func (r *Repository) getItemsFromShelf(item *Item, reservedQuantity int64) (quan
 	return quantity, nil
 }
 
+// Get created orders (reserved items) from DB
 func (r *Repository) getReserves() ([]Reserve, error) {
 	rows, err := r.db.Query("SELECT * FROM reserves")
 	if err != nil {

@@ -60,9 +60,6 @@ func (s *Service) execute(orderNumbers []string) (map[string][]Order, error) {
 							if err != nil {
 								log.Println(err)
 							}
-							limit += 5
-							offset += 5
-							fmt.Println(quantity)
 
 							// If not found in additional, start loop on main shelfs to find items.
 							if quantity != reserve.Quantity {

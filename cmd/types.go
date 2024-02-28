@@ -11,13 +11,13 @@ type Reserve struct {
 type Item struct {
 	Id          int64
 	ItemName    string
-	MainShelf   []uint8
+	MainShelf   rune
 	OtherShelfs []rune
 }
 
 type Shelf struct {
 	Id        int64
-	ShelfType []uint8
+	ShelfType rune
 	Items     pq.Int64Array
 }
 
