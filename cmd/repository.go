@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"unsafe"
 
 	"github.com/lib/pq"
 )
@@ -16,37 +17,72 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
-// func (r *Repository) getItemsFromOtherShelfsWithLimit(shelfType []uint8) (int64, error) {
+// getItemsFromOtherItemShelfs make same functionality as getItemsFromShelfWithLimit, but use other shelfs, instead using main shelf.
+// and have fixed limit (maybe there is multiple other shelfs)
+func (r *Repository) getItemsFromOtherItemShelfs(item *Item, howMuchHave, howMuchNeed, offset, limit int64, otherShel int32) (int64, error) {
+	otherShelToBytes := *(*[]uint8)(unsafe.Pointer(&otherShel)) // Casting to DB type to find with additional shelf
+	fmt.Println(otherShelToBytes)
+	rows, err := r.db.Query("SELECT * FROM shelfs WHERE shelf_type = $1 OFFSET $2 LIMIT $3", []uint8(otherShelToBytes), offset, limit)
+	if err != nil {
+		return 0, fmt.Errorf("error to execute the query: [%s]", err.Error())
+	}
 
-// 	return 0, nil
-// }
+	for rows.Next() {
+		var shelf Shelf
+		err := rows.Scan(&shelf.Id, &shelf.ShelfType, &shelf.Items)
+		if err != nil {
+			return 0, fmt.Errorf("error to scan row with limit: [%s]", err.Error())
+		}
+		fmt.Println(shelf)
+		fmt.Println(howMuchHave)
+
+		for i, id := range shelf.Items {
+			if id != item.Id {
+				continue
+			}
+
+			if howMuchHave == howMuchNeed {
+				return howMuchHave, nil
+			}
+			howMuchHave += 1
+
+			shelf.Items[i] = 0
+			if err := r.updateShelfById(shelf.Id, shelf.Items); err != nil {
+				log.Println(err)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Fatal(err)
+	}
+
+	return howMuchHave, nil
+}
 
 func (r *Repository) getItemsFromShelfWithLimit(item *Item, howMuchHave, howMuchNeed, offset, limit int64) (int64, error) {
-	var shelf Shelf
-	var arrIds pq.Int64Array
-	fmt.Println(howMuchHave)
 	rows, err := r.db.Query("SELECT * FROM shelfs WHERE shelf_type = $1 OFFSET $2 LIMIT $3", item.MainShelf, offset, limit)
 	if err != nil {
 		return 0, fmt.Errorf("error to execute the query: [%s]", err.Error())
 	}
 
 	for rows.Next() {
-		err := rows.Scan(&shelf.Id, &shelf.ShelfType, &arrIds)
+		var shelf Shelf
+		err := rows.Scan(&shelf.Id, &shelf.ShelfType, &shelf.Items)
 		if err != nil {
 			return 0, fmt.Errorf("error to scan row with limit: [%s]", err.Error())
 		}
-		shelf.Items = arrIds
 
 		for i, id := range shelf.Items {
 			if id != item.Id {
 				continue
 			}
+
 			if howMuchHave == howMuchNeed {
-				return howMuchNeed, nil
+				return howMuchHave, nil
 			}
 			howMuchHave += 1
-			shelf.Items[i] = 0
 
+			shelf.Items[i] = 0
 			if err := r.updateShelfById(shelf.Id, shelf.Items); err != nil {
 				log.Println(err)
 			}
@@ -77,6 +113,7 @@ func (r *Repository) getItemsFromShelf(item *Item, reservedQuantity int64) (quan
 			return quantity, nil
 		}
 		quantity += 1
+
 		shelf.Items[i] = 0
 		if err := r.updateShelfById(shelf.Id, shelf.Items); err != nil {
 			log.Println(err)
@@ -113,11 +150,13 @@ func (r *Repository) getReserves() ([]Reserve, error) {
 
 func (r *Repository) getItemById(itemId int64) (*Item, error) {
 	var item Item
+	var otherShel pq.Int32Array
 	err := r.db.QueryRow("SELECT * FROM items WHERE id = $1", itemId).
-		Scan(&item.Id, &item.ItemName, &item.MainShelf, &item.OtherShelfs)
+		Scan(&item.Id, &item.ItemName, &item.MainShelf, &otherShel)
 	if err != nil {
 		return nil, fmt.Errorf("error to get item by id[%d]: [%s]", itemId, err.Error())
 	}
+	item.OtherShelfs = otherShel
 
 	return &item, nil
 }

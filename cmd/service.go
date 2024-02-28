@@ -5,7 +5,6 @@ import (
 	"log"
 	"sort"
 	"strconv"
-	"time"
 )
 
 type Service struct {
@@ -50,36 +49,48 @@ func (s *Service) execute(orderNumbers []string) (map[string][]Order, error) {
 					log.Println(err)
 				}
 
+				// If we get not expected quantity.
 				if quantity != reserve.Quantity {
-					fmt.Println(quantity)
-					if len(item.OtherShelfs) == 0 {
-
-						for quantity != reserve.Quantity {
-							time.Sleep(1 * time.Second)
-
-							quantity, err = s.repository.getItemsFromShelfWithLimit(item, quantity, reserve.Quantity, offset, limit)
+					// If we have additional shelfs of item.
+					if len(item.OtherShelfs) != 0 {
+						// Range over them (maybe there is multiple additional shelfs).
+						for _, otherShel := range item.OtherShelfs {
+							// Try to find with additional shelfs, and some limit.
+							quantity, err = s.repository.getItemsFromOtherItemShelfs(item, quantity, reserve.Quantity, offset, limit, otherShel)
 							if err != nil {
 								log.Println(err)
 							}
-							fmt.Println(quantity)
 							limit += 5
 							offset += 5
-						}
+							fmt.Println(quantity)
 
-					} else {
-						// quantity, err = s.repository.getItemsFromOtherShelfsWithLimit([]uint8{})
-						// if err != nil {
-						// 	log.Println(err)
-						// }
-						fmt.Println("got on two")
+							// If not found in additional, start loop on main shelfs to find items.
+							if quantity != reserve.Quantity {
+								for quantity != reserve.Quantity {
+									quantity, err = s.repository.getItemsFromShelfWithLimit(item, quantity, reserve.Quantity, offset, limit)
+									if err != nil {
+										log.Println(err)
+									}
+									limit += 5
+									offset += 5
+								}
+							}
+						}
+					}
+					// If doesn't have some additional shelfs, go immediately in loop to find items.
+					for quantity != reserve.Quantity {
+						quantity, err = s.repository.getItemsFromShelfWithLimit(item, quantity, reserve.Quantity, offset, limit)
+						if err != nil {
+							log.Println(err)
+						}
+						limit += 5
+						offset += 5
 					}
 				}
 
-				itemOthShel := []string{}
+				itemOthShel := []int32{}
 				if item.OtherShelfs != nil {
-					for _, shel := range item.OtherShelfs {
-						itemOthShel = append(itemOthShel, string(shel))
-					}
+					itemOthShel = append(itemOthShel, item.OtherShelfs...)
 				}
 
 				order := newOrder(item.ItemName, item.Id, reserve.Id, quantity, itemOthShel)

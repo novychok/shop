@@ -41,7 +41,7 @@ func main() {
 		fmt.Printf("===Стелаж %s\n", key)
 		for _, k := range val {
 			if len(k.OtherShelfs) != 0 {
-				fmt.Printf("%s (id=%d) \nзаказ %d, %d шт\nдоп стелаж: %v\n", k.ItemName, k.ItemId, k.OrderId, k.Quantity, k.OtherShelfs)
+				fmt.Printf("%s (id=%d) \nзаказ %d, %d шт\nдоп стелаж: %v\n", k.ItemName, k.ItemId, k.OrderId, k.Quantity, string(k.OtherShelfs))
 				fmt.Println()
 				continue
 			}
